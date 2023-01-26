@@ -1,0 +1,263 @@
+
+#ifndef PBR_H
+#define PBR_H
+
+#include "util.glslh"
+
+// NOTE: should match STAGE3D_MAX_LIGHTS in stageutils.h
+#define PBR_MAX_LIGHTS 6
+
+#ifndef PBR_ALPHA_DISCARD_THRESHOLD
+	#define PBR_ALPHA_DISCARD_THRESHOLD 0.3
+#endif
+
+struct PointLight {
+	vec3 pos;		// camera-relative
+	vec3 color;
+};
+
+struct PBRMaterial {
+	vec3 ambient;
+	vec3 albedo;
+	vec3 normal;
+	float roughness;
+	float metallic;
+	float ambient_occlusion;
+	float alpha;
+};
+
+struct PBRParams {
+	PBRMaterial mat;
+	vec3 fragPos;
+	mat4 inv_camera_transform;
+};
+
+struct PBRState {
+	PBRParams params;
+	vec3 V; // fragment to view (normalized)
+	vec3 N; // fragment normal
+	float NdotV;
+	vec3 F0;
+	float roughness2;
+	float roughness4;
+	float geometryKfactor;
+	float geometryNdotVDenomTerm;
+	vec3 fresnelNV;
+};
+
+float PBR_GeometrySchlickGGXDenom(float NdotV, float k);
+vec3 PBR_FresnelSchlick(float cosTheta, vec3 F0);
+
+PBRState PBR(PBRParams p) {
+	PBRState st;
+	st.params = p;
+	st.N = p.mat.normal;
+	st.V = normalize(-p.fragPos);
+	st.NdotV = max(dot(st.N, st.V), 0.0);
+	st.F0 = mix(vec3(0.04), p.mat.albedo, p.mat.metallic);
+	st.roughness2 = p.mat.roughness * p.mat.roughness;
+	st.roughness4 = st.roughness2 * st.roughness2;
+	// st.geometryKfactor = st.roughness2 * 0.5;
+	st.geometryKfactor = (p.mat.roughness + 1) * 0.125;
+	st.geometryNdotVDenomTerm = PBR_GeometrySchlickGGXDenom(st.NdotV, st.geometryKfactor);
+	st.fresnelNV = PBR_FresnelSchlick(st.NdotV, st.F0);
+	return st;
+}
+
+vec2 PBR_DistributionGGXFraction(float NdotH, float a2) {
+	// float a = roughness * roughness;
+	// float a2 = a * a;
+	float NdotH2 = NdotH * NdotH;
+
+	float num = a2;
+	float denom = NdotH2 * (a2 - 1.0) + 1.0;
+	denom = pi * denom * denom;
+
+	return vec2(num, denom);
+}
+
+float PBR_DistributionGGX(float NdotH, float a2) {
+	vec2 d = PBR_DistributionGGXFraction(NdotH, a2);
+	return d.x / d.y;
+}
+
+float PBR_GeometrySchlickGGXDenom(float NdotV, float k) {
+	return mix(NdotV, 1, k);
+}
+
+float PBR_GeometrySchlickGGX(float NdotV, float k) {
+	return NdotV / PBR_GeometrySchlickGGXDenom(NdotV, k);
+}
+
+float PBR_GeometrySmithDenom(float NdotV, float NdotL, float k) {
+	return PBR_GeometrySchlickGGXDenom(NdotL, k) * PBR_GeometrySchlickGGXDenom(NdotV, k);
+}
+
+float PBR_GeometrySmith(float NdotV, float NdotL, float k) {
+	return NdotV * NdotL / PBR_GeometrySmithDenom(NdotV, NdotL, k);
+}
+
+vec3 PBR_FresnelSchlick(float cosTheta, vec3 F0) {
+	float x = 1.0 - cosTheta;
+	float x2 = x * x;
+	float x5 = x2 * x2 * x;
+
+    return mix(vec3(x5), vec3(1.0), F0);
+}
+
+vec3 PBR_FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
+	float x = 1.0 - cosTheta;
+	float x2 = x * x;
+	float x5 = x2 * x2 * x;
+
+	return F0 + (max(vec3(1.0 - roughness), F0) - F0) * x5;
+}
+
+vec3 PBR_PointLight(PBRState st, PointLight light) {
+	vec3 Lo = vec3(0.0);
+
+	vec3 ldir = light.pos - st.params.fragPos;
+	vec3 L = normalize(ldir);
+	vec3 H = normalize(st.V + L);
+	vec3 radiance = light.color / dot(ldir, ldir);
+
+	float NdotL = max(dot(st.N, L), 0.0);
+	float NdotH = max(dot(st.N, H), 0.0);
+	float HdotL = max(dot(H, L), 0.0);
+
+	vec3 fresnelHL = PBR_FresnelSchlick(HdotL, st.F0);
+	vec3 fresnelNL = PBR_FresnelSchlick(NdotL, st.F0);
+	vec3 fresnelNV = st.fresnelNV;
+
+	vec2 NDF = PBR_DistributionGGXFraction(NdotH, st.roughness4);
+	float Gdenom = st.geometryNdotVDenomTerm * PBR_GeometrySchlickGGXDenom(NdotL, st.geometryKfactor);
+
+	vec3 diffuse = mix(0.3183098861837907, 0, st.params.mat.metallic) * st.params.mat.albedo;
+	float specular = NDF.x / (NDF.y * 4.0 * Gdenom);
+
+	vec3 combined = fresnelHL * specular + ((1 - fresnelNL) * (1 - fresnelNV)) * diffuse;
+
+	return combined * radiance * NdotL;
+}
+
+vec3 PBR_PointLights(
+	PBRState pbr, int nlights, vec3 positions[PBR_MAX_LIGHTS], vec3 colors[PBR_MAX_LIGHTS]
+) {
+	vec3 color = vec3(0);
+
+	for(int i = 0; i < nlights; ++i) {
+		color += PBR_PointLight(pbr, PointLight(positions[i], colors[i]));
+	}
+
+	return color;
+}
+
+vec3 PBR_ReflectionRay(PBRState st) {
+	return mat3(st.params.inv_camera_transform) * reflect(st.params.fragPos, st.N);
+}
+
+vec3 PBR_EnvironmentLightFake(PBRState st, samplerCube envmap) {
+	vec3 reflected_ray = PBR_ReflectionRay(st);
+	vec3 reflection = texture(envmap, fixCubeCoord(reflected_ray)).rgb;
+	float r = (1 - st.params.mat.roughness);
+	vec3 l = (r * r) * reflection * mix(vec3(0.5), st.params.mat.albedo, st.params.mat.metallic);
+	return l * st.params.mat.ambient_occlusion;
+}
+
+vec3 PBR_EnvironmentLight(
+	PBRState st,
+	sampler2D brdf_lut,
+// 	samplerCube irradiance_map,
+	samplerCube prefiltered_cubemap
+) {
+	// Partial IBL implementation (TODO):
+	//  * No diffuse, specular only
+	//  * "Prefiltered" cubemap is not actually prefiltered - mipmaps are used as usual, and roughness is not taken into account. This makes reflections much sharper than they should be.
+
+	vec3 reflected_ray = PBR_ReflectionRay(st);
+	vec3 R = fixCubeCoord(reflected_ray);
+	vec3 F = PBR_FresnelSchlickRoughness(st.NdotV, st.F0, st.params.mat.roughness);
+
+	// Diffuse
+#if 0
+	vec3 kS = F;
+	vec3 kD = 1.0 - kS;
+	kD *= 1.0 - st.params.mat.metallic;
+	vec3 irradiance = texture(irradiance_map, st.N).rgb;
+	vec3 diffuse = irradiance * st.params.mat.albedo;
+#endif
+
+	// Specular
+	const float MAX_REFLECTION_LOD = 8.0;  // TODO pass as uniform or use LOD query extension
+// 	vec3 reflection = textureLod(prefiltered_cubemap, R, st.params.roughness * MAX_REFLECTION_LOD).rgb;
+	vec3 reflection = texture(prefiltered_cubemap, R).rgb;
+	vec2 brdf = texture(brdf_lut, vec2(st.NdotV, st.params.mat.roughness)).rg;
+	vec3 specular = reflection * (F * brdf.x + brdf.y);
+
+// 	vec3 l = kD * diffuse + specular;
+	vec3 l = specular;
+
+	return l * st.params.mat.ambient_occlusion;
+}
+
+
+vec3 PBR_TonemapReinhard(vec3 color) {
+	return color / (color + 1.0);
+}
+
+vec3 PBR_TonemapUchimura(vec3 x, float P, float a, float m, float l, float c, float b) {
+	// Uchimura 2017, "HDR theory and practice"
+	// Math: https://www.desmos.com/calculator/gslcdxvipg
+	// Source: https://www.slideshare.net/nikuque/hdr-theory-and-practicce-jp
+	float l0 = ((P - m) * l) / a;
+	float L0 = m - m / a;
+	float L1 = m + (1.0 - m) / a;
+	float S0 = m + l0;
+	float S1 = m + a * l0;
+	float C2 = (a * P) / (P - S1);
+	float CP = -C2 / P;
+
+	vec3 w0 = 1.0 - smoothstep(0.0, m, x);
+	vec3 w2 = step(m + l0, x);
+	vec3 w1 = 1.0 - w0 - w2;
+
+	vec3 T = m * pow(x / m, vec3(c)) + b;
+	vec3 S = P - (P - S1) * exp(CP * (x - S0));
+	vec3 L = m + a * (x - m);
+
+	return T * w0 + L * w1 + S * w2;
+}
+
+vec3 PBR_TonemapUchimura(vec3 x) {
+	const float P = 1.0;  // max display brightness
+	const float a = 1.0;  // contrast
+	const float m = 0.22; // linear section start
+	const float l = 0.4;  // linear section length
+	const float c = 1.33; // black
+	const float b = 0.0;  // pedestal
+	return PBR_TonemapUchimura(x, P, a, m, l, c, b);
+}
+
+vec3 PBR_TonemapUnreal(vec3 x) {
+	// NOTE: built-in gamma correction
+	return x / (x + 0.155) * 1.019;
+}
+
+vec3 PBR_TonemapACES(vec3 x) {
+	// Narkowicz 2015, "ACES Filmic Tone Mapping Curve"
+	const float a = 2.51;
+	const float b = 0.03;
+	const float c = 2.43;
+	const float d = 0.59;
+	const float e = 0.14;
+	return (x * (a * x + b)) / (x * (c * x + d) + e);
+}
+
+vec3 PBR_GammaCorrect(vec3 color) {
+	// Approximate linear->sRGB conversion
+	return pow(color, vec3(1.0/2.2));
+}
+
+#define PBR_TonemapDefault PBR_TonemapUchimura
+
+#endif

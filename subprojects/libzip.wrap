@@ -1,0 +1,8 @@
+[wrap-git]
+directory=libzip
+url=https://github.com/taisei-project/libzip.git
+push-url=git@github.com:taisei-project/libzip.git
+revision=meson-1.7.3.142
+
+[provide]
+libzip=libzip_dep

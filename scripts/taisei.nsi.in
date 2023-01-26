@@ -1,0 +1,282 @@
+Unicode true
+
+!include LogicLib.nsh
+
+!define PROJECT "Taisei Project"
+!define PROJECT_URL "https://taisei-project.org/"
+!define PUBLISHER "${PROJECT}"
+!define APPNAME "${PROJECT}"
+!define APPREGISTRY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}"
+
+Name "${PROJECT}"
+OutFile "@OUTPUT@"
+
+; LZMA compression is *very* slow
+SetCompressor /SOLID zlib
+
+!define VERSION "@VERSION({string})@"
+!define PATCH "0"
+!define INST_DIR "@INSTALL_DIR@"
+
+!if @TAISEI_64BIT@ == 1
+    !include x64.nsh
+    !define MULTIUSER_USE_PROGRAMFILES64
+!endif
+
+; All vars must be global...
+Var STARTMENU_FOLDER
+Var INSTALL_DESKTOP
+
+; Multi-user handling
+!define MULTIUSER_EXECUTIONLEVEL Highest
+!define MULTIUSER_MUI
+!define MULTIUSER_INSTALLMODE_COMMANDLINE
+!define MULTIUSER_INSTALLMODE_INSTDIR "${APPNAME}"
+!define MULTIUSER_INSTALLMODE_INSTDIR_REGISTRY_KEY "${APPREGISTRY}"
+!define MULTIUSER_INSTALLMODE_INSTDIR_REGISTRY_VALUENAME "InstallLocation"
+!define MULTIUSER_INSTALLMODE_DEFAULT_REGISTRY_KEY "${APPREGISTRY}"
+!define MULTIUSER_INSTALLMODE_DEFAULT_REGISTRY_VALUENAME "InstallMode"
+!include "MultiUser.nsh"
+
+; UI
+!include "MUI2.nsh"
+
+!define MUI_HEADERIMAGE_BITMAP "@MESON_SOURCE_ROOT@/misc/icons/taisei.ico"
+
+!insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_LICENSE "@MESON_BUILD_ROOT@/COPYING.txt"
+
+!define MULTIUSER_INSTALLMODEPAGE_TEXT_ALLUSERS "Install globally for all users (required for replay file association)"
+!insertmacro MULTIUSER_PAGE_INSTALLMODE
+
+!insertmacro MUI_PAGE_DIRECTORY
+
+!define MUI_STARTMENUPAGE_REGISTRY_ROOT "SHCTX"
+!define MUI_STARTMENUPAGE_REGISTRY_KEY "${APPREGISTRY}"
+!define MUI_STARTMENUPAGE_REGISTRY_VALUENAME "StartMenu"
+!insertmacro MUI_PAGE_STARTMENU Application $STARTMENU_FOLDER
+
+!insertmacro MUI_PAGE_INSTFILES
+
+!define MUI_FINISHPAGE_NOAUTOCLOSE
+!define MUI_FINISHPAGE_RUN_NOTCHECKED
+!define MUI_FINISHPAGE_RUN "$INSTDIR/taisei.exe"
+!define MUI_FINISHPAGE_SHOWREADME "$INSTDIR/README.txt"
+!define MUI_FINISHPAGE_LINK "Visit project web site"
+!define MUI_FINISHPAGE_LINK_LOCATION "${PROJECT_URL}"
+!insertmacro MUI_PAGE_FINISH
+
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+!insertmacro MUI_UNPAGE_FINISH
+
+!insertmacro MUI_LANGUAGE "English"
+
+; Installer sections
+Function AddToInstallerRegisty
+    Pop $0
+    Pop $1
+    StrCmp "$0" "" ConditionalAddToRegisty_EmptyString
+        WriteRegStr SHCTX "${APPREGISTRY}" "$1" "$0"
+        DetailPrint "Set install registry entry: '$1' to '$0'"
+    ConditionalAddToRegisty_EmptyString:
+FunctionEnd
+
+Section "-Core installation"
+    SetOutPath "$INSTDIR"
+
+    File /r "${INST_DIR}\*.*"
+
+    ; Uninstaller
+    WriteUninstaller "$INSTDIR\Uninstall.exe"
+
+    Push "DisplayName"
+    Push "${APPNAME}"
+    Call AddToInstallerRegisty
+
+    Push "DisplayVersion"
+    Push "${VERSION}"
+    Call AddToInstallerRegisty
+
+    Push "Publisher"
+    Push "${PUBLISHER}"
+    Call AddToInstallerRegisty
+
+    Push "UninstallString"
+    Push "$\"$INSTDIR\Uninstall.exe$\""
+    Call AddToInstallerRegisty
+
+    Push "QuietUninstallString"
+    Push "$\"$INSTDIR\Uninstall.exe$\" /S"
+    Call AddToInstallerRegisty
+
+    Push "NoRepair"
+    Push "1"
+    Call AddToInstallerRegisty
+
+    Push "NoModify"
+    Push "1"
+    Call AddToInstallerRegisty
+
+    Push "DisplayIcon"
+    Push "$INSTDIR\taisei.exe"
+    Call AddToInstallerRegisty
+
+    Push "HelpLink"
+    Push "${PROJECT_URL}"
+    Call AddToInstallerRegisty
+
+    Push "URLInfoAbout"
+    Push "${PROJECT_URL}"
+    Call AddToInstallerRegisty
+
+    Push "URLUpdateInfo"
+    Push "${PROJECT_URL}"
+    Call AddToInstallerRegisty
+
+    Push "Readme"
+    Push "$INSTDIR\README.txt"
+    Call AddToInstallerRegisty
+
+    Push "InstallLocation"
+    Push "$INSTDIR"
+    Call AddToInstallerRegisty
+
+    Push "InstallMode"
+    Push "$MultiUser.InstallMode"
+    Call AddToInstallerRegisty
+
+    Push "InstallToDesktop"
+    Push "$INSTALL_DESKTOP"
+    Call AddToInstallerRegisty
+
+    !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
+
+    CreateDirectory "$SMPROGRAMS\$STARTMENU_FOLDER"
+
+    CreateShortcut "$SMPROGRAMS\$STARTMENU_FOLDER\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
+    CreateShortcut "$SMPROGRAMS\$STARTMENU_FOLDER\Taisei.lnk" "$INSTDIR\taisei.exe"
+
+    !if @USE_ANGLE@ == 1
+        CreateShortcut "$SMPROGRAMS\$STARTMENU_FOLDER\Taisei (ANGLE).lnk" "$INSTDIR\taisei.exe" "--renderer gles30"
+    !endif
+
+    ${If} "$INSTALL_DESKTOP" == "1"
+        CreateShortcut "$DESKTOP\Taisei.lnk" "$INSTDIR\taisei.exe"
+
+        !if @USE_ANGLE@ == 1
+            CreateShortcut "$DESKTOP\Taisei (ANGLE).lnk" "$INSTDIR\taisei.exe" "--renderer gles30"
+        !endif
+    ${EndIf}
+
+    !insertmacro MUI_STARTMENU_WRITE_END
+
+    ${If} $MultiUser.InstallMode == "AllUsers"
+        DeleteRegKey HKCR ".tsr"
+        DeleteRegKey HKCR "TaiseiProject.tsr"
+        DeleteRegKey HKCR "TaiseiProject.tsr\DefaultIcon"
+        DeleteRegKey HKCR "TaiseiProject.tsr\Shell"
+        DeleteRegKey HKCR "TaiseiProject.tsr\Shell\Open"
+        DeleteRegKey HKCR "TaiseiProject.tsr\Shell\Open\Command"
+        DeleteRegKey HKCR "Applications\taisei.exe"
+        DeleteRegKey HKCR "Applications\taisei.exe\DefaultIcon"
+        DeleteRegKey HKCR "Applications\taisei.exe\Shell"
+        DeleteRegKey HKCR "Applications\taisei.exe\Shell\Open"
+        DeleteRegKey HKCR "Applications\taisei.exe\Shell\Open\Command"
+
+        WriteRegStr HKCR ".tsr" "" "TaiseiProject.tsr"
+        WriteRegStr HKCR ".tsr" "Content Type" "application/x-taisei-replay"
+        WriteRegStr HKCR "TaiseiProject.tsr" "" "Taisei Project replay"
+        WriteRegStr HKCR "TaiseiProject.tsr" "FriendlyTypeName" "@$INSTDIR\taisei.exe,-2"
+        WriteRegStr HKCR "TaiseiProject.tsr\DefaultIcon" "" "$INSTDIR\taisei.exe,1"
+        WriteRegStr HKCR "TaiseiProject.tsr\Shell\Open\Command" "" "$\"$INSTDIR\taisei.exe$\" --replay $\"%1$\""
+        WriteRegStr HKCR "Applications\taisei.exe" "" "Taisei Project"
+        WriteRegStr HKCR "Applications\taisei.exe" "FriendlyAppName" "@$INSTDIR\taisei.exe,-1"
+        WriteRegStr HKCR "Applications\taisei.exe\DefaultIcon" "" "$INSTDIR\taisei.exe,1"
+        WriteRegStr HKCR "Applications\taisei.exe\Shell\Open\Command" "" "$\"$INSTDIR\taisei.exe$\" --replay $\"%1$\""
+    ${EndIf}
+SectionEnd
+
+Section "Uninstall"
+    ReadRegStr $INSTALL_DESKTOP SHCTX "${APPREGISTRY}" "InstallToDesktop"
+
+    ${If} $MultiUser.InstallMode == "AllUsers"
+        DeleteRegKey HKCR ".tsr"
+        DeleteRegKey HKCR "TaiseiProject.tsr"
+        DeleteRegKey HKCR "TaiseiProject.tsr\DefaultIcon"
+        DeleteRegKey HKCR "TaiseiProject.tsr\Shell"
+        DeleteRegKey HKCR "TaiseiProject.tsr\Shell\Open"
+        DeleteRegKey HKCR "TaiseiProject.tsr\Shell\Open\Command"
+        DeleteRegKey HKCR "Applications\taisei.exe"
+        DeleteRegKey HKCR "Applications\taisei.exe\DefaultIcon"
+        DeleteRegKey HKCR "Applications\taisei.exe\Shell"
+        DeleteRegKey HKCR "Applications\taisei.exe\Shell\Open"
+        DeleteRegKey HKCR "Applications\taisei.exe\Shell\Open\Command"
+    ${EndIf}
+
+    @UNINSTALL_COMMANDS@
+
+    Delete "$INSTDIR\Uninstall.exe"
+    RMDir "$INSTDIR"
+
+    !insertmacro MUI_STARTMENU_GETFOLDER Application $STARTMENU_FOLDER
+    Delete "$SMPROGRAMS\$STARTMENU_FOLDER\Uninstall.lnk"
+    Delete "$SMPROGRAMS\$STARTMENU_FOLDER\Taisei.lnk"
+    Delete "$SMPROGRAMS\$STARTMENU_FOLDER\Taisei (OpenGL).lnk"
+    Delete "$SMPROGRAMS\$STARTMENU_FOLDER\Taisei (ANGLE).lnk"
+    RMDir "$SMPROGRAMS\$STARTMENU_FOLDER"
+
+    ${If} "$INSTALL_DESKTOP" == "1"
+        Delete "$DESKTOP\Taisei.lnk"
+        Delete "$DESKTOP\Taisei (OpenGL).lnk"
+        Delete "$DESKTOP\Taisei (ANGLE).lnk"
+    ${EndIf}
+
+    DeleteRegKey SHCTX "${APPREGISTRY}"
+SectionEnd
+
+!macro INIT_X64
+    !if @TAISEI_64BIT@ == 1
+        ${If} ${RunningX64}
+            SetRegView 64
+        ${Else}
+            MessageBox MB_OK|MB_ICONSTOP "This installer is for 64-bit systems only."
+            Abort
+        ${EndIf}
+    !endif
+!macroend
+
+Function .onInit
+    !insertmacro INIT_X64
+    !insertmacro MULTIUSER_INIT
+
+    ReadRegStr $0 SHCTX "${APPREGISTRY}" "UninstallString"
+    StrCmp $0 "" inst
+
+    MessageBox MB_YESNOCANCEL|MB_ICONEXCLAMATION \
+        "${APPNAME} is already installed.$\n$\nDo you want to uninstall the old version before installing the new one?$\n$\nIf unsure, choose YES." \
+        /SD IDYES IDYES uninst IDNO inst
+    Abort
+
+;Run the uninstaller
+uninst:
+    ClearErrors
+    ReadRegStr $1 SHCTX "${APPREGISTRY}" "QuietUninstallString"
+    ReadRegStr $2 SHCTX "${APPREGISTRY}" "InstallLocation"
+    IfErrors uninst_failed
+    ExecWait '$1 _?=$2' ; Do not copy the uninstaller to a temp file
+    IfErrors uninst_failed inst
+
+uninst_failed:
+    MessageBox MB_OK|MB_ICONSTOP "Uninstall failed."
+    Abort
+
+inst:
+    ; TODO: Maybe make it optional again
+    StrCpy $INSTALL_DESKTOP "1"
+FunctionEnd
+
+Function un.onInit
+    !insertmacro INIT_X64
+    !insertmacro MULTIUSER_UNINIT
+FunctionEnd

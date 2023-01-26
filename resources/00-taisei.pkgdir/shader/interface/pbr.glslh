@@ -1,0 +1,120 @@
+#ifndef I_PBR_H
+#define I_PBR_H
+
+#include "standard.glslh"
+#include "../lib/pbr_features.glslh"
+#include "../lib/pbr.glslh"
+
+UNIFORM(1) int features_mask;
+
+UNIFORM(2) sampler2D diffuse_map;
+UNIFORM(3) sampler2D normal_map;
+UNIFORM(4) sampler2D ambient_map;
+UNIFORM(5) sampler2D roughness_map;
+UNIFORM(6) samplerCube environment_map;
+UNIFORM(7) sampler2D depth_map;
+UNIFORM(8) sampler2D ao_map;
+UNIFORM(9) sampler2D ibl_brdf_lut;
+
+// These either modulate their respective maps, or are used instead of them
+UNIFORM(10) vec4 diffuseRGB_metallicA;
+UNIFORM(11) vec4 ambientRGB_roughnessA;
+UNIFORM(12) vec4 environmentRGB_depthScale;
+
+UNIFORM(13) mat4 inv_camera_transform;   // only used if PBR_FEATURE_ENVIRONMENT_MAP is set
+
+UNIFORM(14) int light_count;
+UNIFORM(15) vec3 light_positions[PBR_MAX_LIGHTS];
+UNIFORM(21) vec3 light_colors[PBR_MAX_LIGHTS]; // layout-id also depends on PBR_MAX_LIGHTS
+
+VARYING(3) vec3 pos;
+VARYING(4) vec3 tangent;
+VARYING(5) vec3 bitangent;
+
+#ifdef FRAG_STAGE
+
+#include "../lib/pbr_generic.glslh"
+
+void PBR_Interface_LoadMaterial(
+	out PBRMaterial mat,
+	inout vec2 uv,
+	in vec3 pos,
+	in mat3 tbn,
+	in int features_mask
+) {
+	PBR_Generic_MaybeParallaxMap(uv, pos, tbn, features_mask);
+
+	mat.ambient = ambientRGB_roughnessA.rgb;
+	mat.roughness = ambientRGB_roughnessA.a;
+	mat.albedo = diffuseRGB_metallicA.rgb;
+	mat.metallic = diffuseRGB_metallicA.a;
+
+	if(PBR_FEATURE_ENABLED(PBR_FEATURE_ROUGHNESS_ALPHA_DISCARD, features_mask)) {
+		// If this is enabled, then assume roughness map is also enabled.
+		// Sample roughness before diffuse.
+
+		vec4 roughness_sample = texture(roughness_map, uv);
+
+		mat.alpha = roughness_sample.a;
+		if(mat.alpha < PBR_ALPHA_DISCARD_THRESHOLD) {
+			discard;
+		}
+
+		mat.roughness *= roughness_sample.r;
+
+		if(PBR_FEATURE_ENABLED(PBR_FEATURE_DIFFUSE_MAP, features_mask)) {
+			mat.albedo *= texture(diffuse_map, uv).rgb;
+		}
+	} else if(PBR_FEATURE_ENABLED(PBR_FEATURE_DIFFUSE_ALPHA_DISCARD, features_mask)) {
+		// If this is enabled, then assume diffuse map is also enabled.
+		// Sample diffuse before roughness.
+
+		vec4 diffuse_sample = texture(diffuse_map, uv);
+
+		mat.alpha = diffuse_sample.a;
+		if(mat.alpha < PBR_ALPHA_DISCARD_THRESHOLD) {
+			discard;
+		}
+
+		mat.albedo *= diffuse_sample.rgb;
+
+		if(PBR_FEATURE_ENABLED(PBR_FEATURE_ROUGHNESS_MAP, features_mask)) {
+			mat.roughness *= texture(roughness_map, uv).r;
+		}
+	} else {
+		// No alpha discards are enabled.
+
+		mat.alpha = 1.0;
+
+		if(PBR_FEATURE_ENABLED(PBR_FEATURE_DIFFUSE_MAP, features_mask)) {
+			mat.albedo *= texture(diffuse_map, uv).rgb;
+		}
+
+		if(PBR_FEATURE_ENABLED(PBR_FEATURE_ROUGHNESS_MAP, features_mask)) {
+			mat.roughness *= texture(roughness_map, uv).r;
+		}
+	}
+
+	if(PBR_FEATURE_ENABLED(PBR_FEATURE_AMBIENT_MAP, features_mask)) {
+		mat.ambient *= texture(ambient_map, uv).rgb;
+	}
+
+	if(
+		PBR_FEATURE_ENABLED(PBR_FEATURE_AO_MAP, features_mask) &&
+		PBR_FEATURE_ENABLED(PBR_FEATURE_ENVIRONMENT_MAP, features_mask)
+	) {
+		mat.ambient_occlusion = texture(ao_map, uv).r;
+	} else {
+		mat.ambient_occlusion = 1;
+	}
+
+	if(PBR_FEATURE_ENABLED(PBR_FEATURE_NORMAL_MAP, features_mask)) {
+		mat.normal = tbn * sample_normalmap(normal_map, uv);
+	} else {
+		mat.normal = tbn * vec3(0, 0, 1);
+	}
+}
+
+#endif
+
+#endif

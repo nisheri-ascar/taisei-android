@@ -1,0 +1,21 @@
+
+menu_src = files(
+    'charprofile.c',
+    'charselect.c',
+    'common.c',
+    'cutsceneview.c',
+    'difficultyselect.c',
+    'gameovermenu.c',
+    'ingamemenu.c',
+    'mainmenu.c',
+    'media.c',
+    'menu.c',
+    'musicroom.c',
+    'options.c',
+    'replayview.c',
+    'savereplay.c',
+    'spellpractice.c',
+    'stagepractice.c',
+    'stageselect.c',
+    'submenus.c',
+)

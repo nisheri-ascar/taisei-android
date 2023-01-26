@@ -1,0 +1,28 @@
+option(
+    'impl',
+    type : 'combo',
+    choices : [
+        'auto',
+        'fcontext',
+        'win32fiber',
+        'emscripten',
+        'ucontext_e2k',
+        'ucontext',
+        'ucontext_sjlj',
+    ],
+    description : 'Which implementation to use'
+)
+
+option(
+    'threadsafe',
+    type : 'boolean',
+    value : true,
+    description : 'Whether multiple coroutines can be ran on different threads at once (needs compiler support)'
+)
+
+option(
+    'valgrind',
+    type : 'boolean',
+    value : false,
+    description : 'Enable support for running under Valgrind (for debugging)'
+)

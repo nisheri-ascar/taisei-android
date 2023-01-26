@@ -1,0 +1,48 @@
+
+#ifndef DEFS_H
+#define DEFS_H
+
+#if defined(GL_ARB_explicit_uniform_location)
+    #extension GL_ARB_explicit_uniform_location : require
+#endif
+
+#if defined(SPIRV)
+    #extension GL_ARB_separate_shader_objects : require
+#endif
+
+#define LOC(l) layout(location = l)
+
+#if defined(GL_ARB_explicit_uniform_location) || __VERSION__ >= 430
+    #define UNIFORM(l) LOC(l) uniform
+#else
+    #define UNIFORM(l) uniform
+#endif
+
+#if __VERSION__ >= 420 || defined(SPIRV)
+    #define IN(l) LOC(l) in
+    #define OUT(l) LOC(l) out
+#else
+    #define IN(l) in
+    #define OUT(l) out
+#endif
+
+#ifdef FRAG_STAGE
+    #define VARYING(l) IN(l)
+#else
+    #define VARYING(l) OUT(l)
+    #define ATTRIBUTE(l) LOC(l) in
+#endif
+
+#if !defined(NATIVE_ORIGIN_TOPLEFT) && !defined(NATIVE_ORIGIN_BOTTOMLEFT)
+    #define NATIVE_ORIGIN_BOTTOMLEFT
+#endif
+
+#ifdef TRANSPILE_TARGET_LANG
+    #if TRANSPILE_TARGET_LANG == LANG_GLSL
+        #if (TRANSPILE_TARGET_GLSL_ES && TRANSPILE_TARGET_GLSL_VERSION < 300) || (!(TRANSPILE_TARGET_GLSL_ES) && TRANSPILE_TARGET_GLSL_VERSION < 130)
+            #include "legacy_compat.glslh"
+        #endif
+    #endif
+#endif
+
+#endif

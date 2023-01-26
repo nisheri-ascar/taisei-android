@@ -1,0 +1,177 @@
+
+#ifndef UTIL_H
+#define UTIL_H
+
+#include "defs.glslh"
+
+const float pi = 3.141592653589793; // as supplied by google
+const float tau = 2 * pi;
+
+vec2 dir(float a) {
+    return vec2(cos(a), sin(a));
+}
+
+float angle(vec2 v) {
+    return atan(v.y, v.x);
+}
+
+vec2 cmul(vec2 c1, vec2 c2) {
+    // complex multiplication
+    // x = real, y = imaginary
+    return vec2(c1.x*c2.x - c1.y*c2.y, c1.x*c2.y + c1.y*c2.x);
+}
+
+float lum(vec3 c) {
+    return 0.216 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+}
+
+float min3(vec3 c) {
+    return min(c.x, min(c.y, c.z));
+}
+
+vec2 uv_to_region(vec4 region, vec2 uv) {
+    return vec2(
+        mix(region.x, region.x + region.z, uv.x),
+        #ifdef NATIVE_ORIGIN_BOTTOMLEFT
+        1.0 - mix(region.y, region.y + region.w, 1.0 - uv.y)
+        #else
+        mix(region.y, region.y + region.w, uv.y)
+        #endif
+    );
+}
+
+vec4 color_mul_alpha(vec4 c) {
+    return vec4(c.rgb * c.a, c.a);
+}
+
+mat2 rot(float a) {
+    return mat2(cos(a), -sin(a), sin(a), cos(a));
+}
+
+float line_segment(vec2 p, vec2 a, vec2 b, float thickness) {
+    vec2 pa = p - a;
+    vec2 ba = b - a;
+    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return smoothstep(thickness, 0.0, length(pa - ba*h));
+}
+
+vec4 alphaCompose(vec4 bg, vec4 fg) {
+    return fg + bg * (1.0 - fg.a);
+}
+
+// Taken from http://lolengine.net/blog/2013/07/27/rgb-to-hsv-in-glsl
+
+vec3 rgb2hsv(vec3 c) {
+    vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+
+    float d = q.x - min(q.w, q.y);
+    float e = 1.0e-10;
+    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+
+vec3 hsv2rgb(vec3 c) {
+    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+vec3 hueShift(vec3 c, float s) {
+    // TODO: optimize this
+    vec3 hsv = rgb2hsv(c);
+    hsv.x += s;
+    return hsv2rgb(hsv);
+}
+
+vec3 sample_normalmap(sampler2D src, vec2 uv) {
+    vec2 xy = texture(src, uv).rg * 2 - 1;
+    float z = sqrt(1 - xy.x * xy.x - xy.y * xy.y);
+    return vec3(xy, z);
+}
+
+float flip_topleft_to_native(float x) {
+#ifdef NATIVE_ORIGIN_BOTTOMLEFT
+    return 1 - x;
+#else
+    return x;
+#endif
+}
+
+vec2 flip_topleft_to_native(vec2 v) {
+    v.y = flip_topleft_to_native(v.y);
+    return v;
+}
+
+float flip_bottomleft_to_native(float x) {
+#ifdef NATIVE_ORIGIN_TOPLEFT
+    return 1 - x;
+#else
+    return x;
+#endif
+}
+
+vec2 flip_bottomleft_to_native(vec2 v) {
+    v.y = flip_bottomleft_to_native(v.y);
+    return v;
+}
+
+float flip_native_to_topleft(float x) {
+#ifdef NATIVE_ORIGIN_TOPLEFT
+    return x;
+#else
+    return 1 - x;
+#endif
+}
+
+vec2 flip_native_to_topleft(vec2 v) {
+    v.y = flip_native_to_topleft(v.y);
+    return v;
+}
+
+float flip_native_to_bottomleft(float x) {
+#ifdef NATIVE_ORIGIN_BOTTOMLEFT
+    return x;
+#else
+    return 1 - x;
+#endif
+}
+
+vec2 flip_native_to_bottomleft(vec2 v) {
+    v.y = flip_native_to_bottomleft(v.y);
+    return v;
+}
+
+vec2 equirectMapCoord(vec3 v) {
+	float phi = atan(v.y, v.x);
+	float theta = acos(v.z / length(v));
+	return vec2(0.5 + phi / tau, 1 - theta / pi);
+}
+
+vec3 fixCubeCoord(vec3 v) {
+	return v.xzy * vec3(1, -1, 1);
+}
+
+/*
+ * Adapted from https://github.com/tobspr/GLSL-Color-Spaces/blob/master/ColorSpaces.inc.glsl
+ */
+
+const float SRGB_ALPHA = 0.055;
+
+float srgb_to_linear(float channel) {
+	if(channel <= 0.04045) {
+		return channel / 12.92;
+	} else {
+		return pow((channel + SRGB_ALPHA) / (1.0 + SRGB_ALPHA), 2.4);
+	}
+}
+
+float linear_to_srgb(float channel) {
+	if(channel <= 0.0031308) {
+		return 12.92 * channel;
+	} else {
+		return (1.0 + SRGB_ALPHA) * pow(channel, 1.0/2.4) - SRGB_ALPHA;
+	}
+}
+
+#endif

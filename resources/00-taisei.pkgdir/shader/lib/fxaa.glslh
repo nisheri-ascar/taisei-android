@@ -1,0 +1,110 @@
+
+#ifndef FXAA_H
+#define FXAA_H
+
+// Adapted from https://www.geeks3d.com/20110405/fxaa-fast-approximate-anti-aliasing-demo-glsl-opengl-test-radeon-geforce/3/
+
+#include "defs.glslh"
+
+#ifndef FXAA_SUBPIX_SHIFT
+    #define FXAA_SUBPIX_SHIFT (1.0/4.0)
+#endif
+
+#ifndef FXAA_REDUCE_MIN
+    #define FXAA_REDUCE_MIN (1.0/128.0)
+#endif
+
+#ifndef FXAA_REDUCE_MUL
+    #define FXAA_REDUCE_MUL (1.0/8.0)
+#endif
+
+#ifndef FXAA_SPAN_MAX
+    #define FXAA_SPAN_MAX 8.0
+#endif
+
+#ifdef FRAG_STAGE
+
+vec3 fxaa(
+	sampler2D tex,
+	vec2 rcpFrame,
+	vec2 coordNW,
+	vec2 coordNE,
+	vec2 coordSW,
+	vec2 coordSE,
+	vec2 coordM
+) {
+    vec3 rgbNW = textureLod(tex, coordNW, 0).rgb;
+    vec3 rgbNE = textureLod(tex, coordNE, 0).rgb;
+    vec3 rgbSW = textureLod(tex, coordSW, 0).rgb;
+    vec3 rgbSE = textureLod(tex, coordSE, 0).rgb;
+    vec3 rgbM  = textureLod(tex, coordM,  0).rgb;
+
+    vec3 luma = vec3(0.299, 0.587, 0.114);
+    float lumaNW = dot(rgbNW, luma);
+    float lumaNE = dot(rgbNE, luma);
+    float lumaSW = dot(rgbSW, luma);
+    float lumaSE = dot(rgbSE, luma);
+    float lumaM  = dot(rgbM,  luma);
+
+    float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
+    float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
+
+    vec2 dir;
+    dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+    dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+
+    float dirReduce = max(
+        (lumaNW + lumaNE + lumaSW + lumaSE) * (0.25 * FXAA_REDUCE_MUL),
+        FXAA_REDUCE_MIN
+    );
+
+    float rcpDirMin = 1.0/(min(abs(dir.x), abs(dir.y)) + dirReduce);
+    dir = min(vec2(FXAA_SPAN_MAX), max(vec2(-FXAA_SPAN_MAX), dir * rcpDirMin)) * rcpFrame.xy;
+
+    vec3 rgbA = 0.5 * (
+        textureLod(tex, coordM + dir * (1.0/3.0 - 0.5), 0).rgb +
+        textureLod(tex, coordM + dir * (2.0/3.0 - 0.5), 0).rgb
+    );
+
+    vec3 rgbB = rgbA * 0.5 + 0.25 * (
+        textureLod(tex, coordM + dir * (0.0/3.0 - 0.5), 0).rgb +
+        textureLod(tex, coordM + dir * (3.0/3.0 - 0.5), 0).rgb
+    );
+
+    float lumaB = dot(rgbB, luma);
+
+    vec3 result;
+
+    if((lumaB < lumaMin) || (lumaB > lumaMax)) {
+        result = rgbA;
+    } else {
+        result = rgbB;
+    }
+
+    return result;
+}
+
+#endif
+
+#ifdef VERT_STAGE
+
+void fxaaCoords(
+	in  vec2 texCoord,
+	in  vec2 rcpFrame,
+	out vec2 o_coordNW,
+	out vec2 o_coordNE,
+	out vec2 o_coordSW,
+	out vec2 o_coordSE,
+	out vec2 o_coordM
+) {
+	vec2 texCoordShifted = texCoord - (rcpFrame * (0.5 + FXAA_SUBPIX_SHIFT));
+    o_coordNW = texCoordShifted + vec2( 0.0,  0.0) * rcpFrame;
+    o_coordNE = texCoordShifted + vec2( 1.0,  0.0) * rcpFrame;
+    o_coordSW = texCoordShifted + vec2( 0.0,  1.0) * rcpFrame;
+    o_coordSE = texCoordShifted + vec2( 1.0,  1.0) * rcpFrame;
+    o_coordM  = texCoord;
+}
+
+#endif
+
+#endif
